@@ -1,0 +1,18 @@
+name: gemini-rate-limit
+version: 1.0.0
+manifest_version: 1
+kind: standalone
+description: "Proactive rate limiter for Google Gemini API calls (RPM and TPM sliding-window enforcement) with Hermes Desktop status bar live controls."
+author: "Gemini Developer"
+license: MIT
+tier: community
+category: models
+requires_hermes: ">=0.22.5"
+provides_middleware:
+  - llm_execution
+capabilities:
+  provides_tools: []
+  provides_hooks: []
+  provides_middleware:
+    - llm_execution
+  requires_env: []

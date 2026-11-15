@@ -1,0 +1,6 @@
+{
+  "name": "gemini-rate-limit",
+  "label": "Gemini Rate Limit",
+  "description": "Proactive RPM and TPM quota gate for Google Gemini API.",
+  "api": "plugin_api.py"
+}
