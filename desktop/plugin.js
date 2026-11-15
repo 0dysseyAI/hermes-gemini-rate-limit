@@ -33,13 +33,6 @@ async function apiPost(ctx, path, payload) {
   return ctx.rest(path, { method: 'POST', body: payload })
 }
 
-// Preset configurations for common Google Gemini models
-const PRESETS = [
-  { name: 'Gemini 3.5 Flash Lite', rpm: 15, tpm: 250000 },
-  { name: 'Gemini 3.8 Flash', rpm: 10, tpm: 250000 },
-  { name: 'Gemini 2.5 Pro', rpm: 5, tpm: 125000 }
-]
-
 // Global opener ref for PALETTE_AREA shortcut
 let _openPopoverRef = null
 
@@ -374,49 +367,6 @@ function GeminiQuotaStatusItem({ ctx }) {
                       }
                     })
                   ]
-                }),
-                // RPD Unused Reference Note
-                jsx('div', {
-                  style: {
-                    fontSize: '10px',
-                    color: 'var(--ui-text-quaternary, #71717a)',
-                    marginTop: '2px'
-                  },
-                  children: `RPD: ${(status.rpd || 1000).toLocaleString()} ref — unenforced constant (no daily blocking)`
-                })
-              ]
-            }),
-
-            // Quick Presets
-            jsxs('div', {
-              style: { display: 'flex', flexDirection: 'column', gap: '4px' },
-              children: [
-                jsx('span', {
-                  style: { fontSize: '10px', color: 'var(--ui-text-tertiary, #a1a1aa)', fontWeight: '500' },
-                  children: 'Quick Presets (Free Tier):'
-                }),
-                jsxs('div', {
-                  style: { display: 'flex', flexWrap: 'wrap', gap: '4px' },
-                  children: PRESETS.map(preset =>
-                    jsx('button', {
-                      key: preset.name,
-                      type: 'button',
-                      onClick: () => {
-                        setRpmInput(String(preset.rpm))
-                        setTpmInput(String(preset.tpm))
-                      },
-                      style: {
-                        fontSize: '10px',
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        border: '1px solid var(--ui-stroke-secondary, #3f3f46)',
-                        background: 'transparent',
-                        color: 'var(--ui-text-secondary, #a1a1aa)',
-                        cursor: 'pointer'
-                      },
-                      children: `${preset.name} (${preset.rpm} RPM)`
-                    })
-                  )
                 })
               ]
             }),
