@@ -3,7 +3,7 @@ version: 1.0.0
 manifest_version: 1
 kind: standalone
 description: "Proactive rate limiter for Google Gemini API calls (RPM and TPM sliding-window enforcement) with Hermes Desktop status bar live controls."
-author: "Gemini Developer"
+author: "0dysseyAI"
 license: MIT
 tier: community
 category: models
