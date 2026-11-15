@@ -34,6 +34,7 @@ class TestGeminiRateLimit(unittest.TestCase):
             self.limiter._last_wait_seconds = 0.0
             self.limiter._total_throttled_requests = 0
             self.limiter._is_throttling = False
+            current_cfg = rate_limiter.load_config()
             self.limiter._config = {
                 "enabled": True,
                 "rpm": rate_limiter.DEFAULT_RPM,
@@ -41,6 +42,8 @@ class TestGeminiRateLimit(unittest.TestCase):
                 "rpd": rate_limiter.DEFAULT_RPD,
                 "safety_factor": rate_limiter.DEFAULT_SAFETY_FACTOR,
             }
+            if "models" in current_cfg:
+                self.limiter._config["models"] = current_cfg["models"]
 
     def test_1_non_gemini_bypass(self):
         """Verify non-Gemini requests bypass the middleware with 0ms delay."""
@@ -227,6 +230,43 @@ class TestGeminiRateLimit(unittest.TestCase):
         status = self.limiter.get_status()
         self.assertTrue(status["is_throttling"])
         self.assertGreater(self.limiter._cooldown_until, time.time())
+
+    def test_8_model_specific_quotas_from_ai_studio(self):
+        """Verify model-specific quotas populated from Google AI Studio."""
+        cfg = rate_limiter.load_config()
+        self.assertIn("models", cfg)
+        models = cfg["models"]
+
+        # 0-quota models must be skipped
+        self.assertNotIn("gemini-2.5-pro", models)
+        self.assertNotIn("gemini-2-flash", models)
+        self.assertNotIn("deep-research-pro-preview", models)
+
+        # Valid models must have correct limits
+        self.assertEqual(models["gemini-3.5-flash-lite"]["rpm"], 15)
+        self.assertEqual(models["gemini-3.5-flash-lite"]["tpm"], 250000)
+        self.assertEqual(models["gemini-3.5-flash-lite"]["rpd"], 500)
+
+        self.assertEqual(models["gemini-3.8-flash"]["rpm"], 5)
+        self.assertEqual(models["gemini-3.8-flash"]["tpm"], 250000)
+        self.assertEqual(models["gemini-3.8-flash"]["rpd"], 20)
+
+        # Verify get_limits resolves correctly
+        self.limiter._config["models"] = models
+        rpm, tpm, rpd = self.limiter.get_limits("google/gemini-3.8-flash")
+        self.assertEqual(rpm, 5)
+        self.assertEqual(tpm, 250000)
+        self.assertEqual(rpd, 20)
+
+        rpm_lite, tpm_lite, rpd_lite = self.limiter.get_limits("gemini-3.5-flash-lite")
+        self.assertEqual(rpm_lite, 15)
+        self.assertEqual(tpm_lite, 250000)
+        self.assertEqual(rpd_lite, 500)
+
+        # Live API with Unlimited RPM
+        rpm_live, tpm_live, _ = self.limiter.get_limits("gemini-2.5-flash-native-audio-dialog")
+        self.assertIsNone(rpm_live)
+        self.assertEqual(tpm_live, 1000000)
 
 
 if __name__ == "__main__":

@@ -51,8 +51,9 @@ def throttle_gemini_execution(request: Any, next_call: Callable[[Any], Any], **k
 
     limiter = get_limiter()
     estimated_tokens = estimate_request_tokens(request)
+    model = kwargs.get("model") or (request.get("model") if isinstance(request, dict) else None)
 
-    limiter.acquire(estimated_tokens)
+    limiter.acquire(estimated_tokens, model=model)
 
     try:
         response = next_call(request)

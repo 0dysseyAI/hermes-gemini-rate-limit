@@ -63,13 +63,16 @@ def load_config() -> dict[str, Any]:
             with open(cfg_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
-                return {
+                res = {
                     "enabled": bool(data.get("enabled", True)),
                     "rpm": max(1, int(data.get("rpm", DEFAULT_RPM))),
                     "tpm": max(1000, int(data.get("tpm", DEFAULT_TPM))),
                     "rpd": int(data.get("rpd", DEFAULT_RPD)),
                     "safety_factor": float(data.get("safety_factor", DEFAULT_SAFETY_FACTOR)),
                 }
+                if "models" in data and isinstance(data["models"], dict):
+                    res["models"] = data["models"]
+                return res
         except Exception as exc:
             logger.warning("Error reading %s, using defaults: %s", cfg_file, exc)
 
@@ -222,10 +225,48 @@ class GeminiRateLimiter:
                 cfg["enabled"] = bool(new_cfg["enabled"])
             if "safety_factor" in new_cfg:
                 cfg["safety_factor"] = max(0.1, min(1.0, float(new_cfg["safety_factor"])))
+            if "models" in new_cfg and isinstance(new_cfg["models"], dict):
+                cfg["models"] = new_cfg["models"]
             self._config = cfg
             atomic_write_json(CONFIG_PATH, self._config)
             self._write_telemetry_locked(time.time(), wait_seconds=0.0)
             return dict(self._config)
+
+    def get_limits(self, model: Optional[str] = None) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        """Return (rpm, tpm, rpd) for the model or fallback to global config."""
+        with self._lock:
+            default_rpm: Optional[int] = int(self._config.get("rpm", DEFAULT_RPM))
+            default_tpm: Optional[int] = int(self._config.get("tpm", DEFAULT_TPM))
+            default_rpd: Optional[int] = int(self._config.get("rpd", DEFAULT_RPD))
+
+            if not model:
+                return default_rpm, default_tpm, default_rpd
+
+            models_dict = self._config.get("models")
+            if not isinstance(models_dict, dict):
+                return default_rpm, default_tpm, default_rpd
+
+            norm = model.lower().strip().replace("google/", "").replace("gemini/", "").replace("models/", "")
+            norm_slug = re.sub(r'[^a-z0-9.]+', '-', norm).strip('-')
+
+            matched = models_dict.get(norm_slug)
+            if not matched:
+                for slug, cfg in models_dict.items():
+                    if slug in norm_slug or norm_slug in slug:
+                        matched = cfg
+                        break
+
+            if isinstance(matched, dict):
+                rpm = matched.get("rpm")
+                tpm = matched.get("tpm")
+                rpd = matched.get("rpd")
+                return (
+                    int(rpm) if (rpm is not None and rpm != "Unlimited") else None,
+                    int(tpm) if (tpm is not None and tpm != "Unlimited") else None,
+                    int(rpd) if (rpd is not None and rpd != "Unlimited") else None,
+                )
+
+            return default_rpm, default_tpm, default_rpd
 
     def _evict_expired_locked(self, now: float) -> None:
         boundary = now - WINDOW_SECONDS
@@ -273,7 +314,7 @@ class GeminiRateLimiter:
             rpd = int(self._config.get("rpd", DEFAULT_RPD))
             effective_rpm = max(1, int(rpm * safety))
             effective_tpm = max(100, int(tpm * safety))
-            return {
+            status = {
                 "enabled": bool(self._config.get("enabled", True)),
                 "rpm": rpm,
                 "tpm": tpm,
@@ -288,8 +329,11 @@ class GeminiRateLimiter:
                 "is_throttling": self._is_throttling,
                 "timestamp": now,
             }
+            if "models" in self._config:
+                status["models"] = self._config["models"]
+            return status
 
-    def acquire(self, estimated_tokens: int) -> float:
+    def acquire(self, estimated_tokens: int, model: Optional[str] = None) -> float:
         """Acquire permission to execute a Gemini request.
         
         Sleeps if necessary to stay under effective RPM and TPM quotas.
@@ -311,34 +355,37 @@ class GeminiRateLimiter:
                     sleep_duration = max(sleep_duration, self._cooldown_until - now)
 
                 safety = float(self._config.get("safety_factor", DEFAULT_SAFETY_FACTOR))
-                effective_rpm = max(1, int(int(self._config.get("rpm", DEFAULT_RPM)) * safety))
-                effective_tpm = max(100, int(int(self._config.get("tpm", DEFAULT_TPM)) * safety))
+                rpm_limit, tpm_limit, _ = self.get_limits(model)
+                effective_rpm = max(1, int(rpm_limit * safety)) if rpm_limit is not None else None
+                effective_tpm = max(100, int(tpm_limit * safety)) if tpm_limit is not None else None
 
-                # 2. Smooth Minimum Pacing Delay
-                min_pacing = (WINDOW_SECONDS / effective_rpm) * MIN_PACING_RATIO
-                time_since_last = now - self._last_request_time
-                if self._last_request_time > 0 and time_since_last < min_pacing:
-                    pacing_wait = min_pacing - time_since_last
-                    sleep_duration = max(sleep_duration, pacing_wait)
+                # 2. Smooth Minimum Pacing Delay (if RPM bounded)
+                if effective_rpm is not None:
+                    min_pacing = (WINDOW_SECONDS / effective_rpm) * MIN_PACING_RATIO
+                    time_since_last = now - self._last_request_time
+                    if self._last_request_time > 0 and time_since_last < min_pacing:
+                        pacing_wait = min_pacing - time_since_last
+                        sleep_duration = max(sleep_duration, pacing_wait)
 
-                # 3. RPM Sliding-Window Gate
-                if len(self._window) >= effective_rpm:
-                    oldest_ts = self._window[0][0]
-                    rpm_wait = (oldest_ts + WINDOW_SECONDS) - now + 0.05
-                    sleep_duration = max(sleep_duration, rpm_wait)
+                    # 3. RPM Sliding-Window Gate
+                    if len(self._window) >= effective_rpm:
+                        oldest_ts = self._window[0][0]
+                        rpm_wait = (oldest_ts + WINDOW_SECONDS) - now + 0.05
+                        sleep_duration = max(sleep_duration, rpm_wait)
 
-                # 4. TPM Sliding-Window Gate
-                current_tokens = self._window_tokens_locked()
-                if self._window and (current_tokens + estimated_tokens > effective_tpm):
-                    # Find how many entries need to expire to fit this request
-                    cum_sub = 0
-                    tpm_wait = 0.0
-                    for ts, tok in self._window:
-                        cum_sub += tok
-                        tpm_wait = (ts + WINDOW_SECONDS) - now + 0.05
-                        if current_tokens - cum_sub + estimated_tokens <= effective_tpm:
-                            break
-                    sleep_duration = max(sleep_duration, tpm_wait)
+                # 4. TPM Sliding-Window Gate (if TPM bounded)
+                if effective_tpm is not None:
+                    current_tokens = self._window_tokens_locked()
+                    if self._window and (current_tokens + estimated_tokens > effective_tpm):
+                        # Find how many entries need to expire to fit this request
+                        cum_sub = 0
+                        tpm_wait = 0.0
+                        for ts, tok in self._window:
+                            cum_sub += tok
+                            tpm_wait = (ts + WINDOW_SECONDS) - now + 0.05
+                            if current_tokens - cum_sub + estimated_tokens <= effective_tpm:
+                                break
+                        sleep_duration = max(sleep_duration, tpm_wait)
 
                 if sleep_duration <= 0.0:
                     # Slot acquired cleanly

@@ -26,6 +26,7 @@ class ConfigUpdateRequest(BaseModel):
     rpd: Optional[int] = Field(None, ge=1, description="Peak requests per day (unused reference constant)")
     enabled: Optional[bool] = Field(None, description="Whether rate limiting is enabled")
     safety_factor: Optional[float] = Field(None, ge=0.1, le=1.0, description="Safety factor (0.1 to 1.0)")
+    models: Optional[dict[str, Any]] = Field(None, description="Model-specific quota limits")
 
 
 @router.get("/status")
