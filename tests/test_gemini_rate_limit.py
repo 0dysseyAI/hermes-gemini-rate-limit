@@ -170,8 +170,8 @@ class TestGeminiRateLimit(unittest.TestCase):
 
     def test_5_default_rpd_unenforced_constant(self):
         """Verify DEFAULT_RPD exists and does NOT block even with >1000 simulated calls."""
-        self.assertEqual(plugin.DEFAULT_RPD, 1000)
-        self.assertEqual(rate_limiter.DEFAULT_RPD, 1000)
+        self.assertEqual(plugin.DEFAULT_RPD, 500)
+        self.assertEqual(rate_limiter.DEFAULT_RPD, 500)
 
         # Disable sleep/pacing for this stress test by advancing time
         simulated_now = 3000.0
@@ -187,7 +187,7 @@ class TestGeminiRateLimit(unittest.TestCase):
             mock_sleep.assert_not_called()
             # And status reports RPD purely as a reference field
             status = self.limiter.get_status()
-            self.assertEqual(status["rpd"], 1000)
+            self.assertEqual(status["rpd"], 500)
 
     def test_6_rest_config_live_update(self):
         """Verify POST /config updates rpm and tpm live and persists atomically."""
@@ -216,6 +216,9 @@ class TestGeminiRateLimit(unittest.TestCase):
             loaded = rate_limiter.load_config()
             self.assertEqual(loaded["rpm"], 20)
             self.assertEqual(loaded["tpm"], 350000)
+
+            # Restore default config after test
+            await update_config(ConfigUpdateRequest(rpm=15, tpm=250000, rpd=500, enabled=True))
 
         asyncio.run(run_async())
 

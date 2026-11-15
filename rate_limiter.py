@@ -18,7 +18,7 @@ logger = logging.getLogger("hermes.plugins.gemini_rate_limit")
 # Reference model profile: Gemini 3.5 Flash Lite (Free Tier)
 DEFAULT_RPM = 15       # Peak requests per minute (ENFORCED)
 DEFAULT_TPM = 250_000  # Peak input tokens per minute (ENFORCED)
-DEFAULT_RPD = 1_000    # Peak requests per day (UNUSED REFERENCE CONSTANT — NOT ENFORCED)
+DEFAULT_RPD = 500      # Peak requests per day (UNUSED REFERENCE CONSTANT — NOT ENFORCED)
 DEFAULT_SAFETY_FACTOR = 0.92
 WINDOW_SECONDS = 60.0
 MIN_PACING_RATIO = 0.75  # Enforces smooth minimum pacing delay: (60.0 / effective_rpm * 0.75)
